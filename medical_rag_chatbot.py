@@ -5,6 +5,8 @@ import json
 import time
 import os
 import spacy
+import signal
+import sys
 from typing import List, Dict, Tuple
 from dotenv import load_dotenv
 
@@ -588,7 +590,21 @@ def create_interface():
     
     return demo
 
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    print(f"\n🛑 Received signal {signum}. Shutting down gracefully...")
+    print("✅ Emergency Medicine RAG Chatbot stopped")
+    sys.exit(0)
+
 if __name__ == "__main__":
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    print("🏥 Starting Emergency Medicine RAG Chatbot...")
+    print("🌐 Web interface will be available at: http://localhost:7871")
+    print("⏹️  Send SIGTERM or SIGINT to stop gracefully")
+    
     demo = create_interface()
     demo.launch(
         server_name="0.0.0.0",

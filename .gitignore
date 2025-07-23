@@ -58,6 +58,9 @@ Thumbs.db
 *.log
 logs/
 
+# Process management
+*.pid
+
 # Docker
 .docker/
 
