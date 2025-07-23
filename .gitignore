@@ -65,8 +65,8 @@ logs/
 *.tmp
 *.temp
 
-# Large data files (optional - you may want to include these)
-# *.jsonl
+# Large data files
+*.jsonl
 # *.pdf
 
 # System packages
