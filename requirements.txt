@@ -1,0 +1,26 @@
+# Core Dependencies
+gradio>=4.0.0
+numpy>=1.26.4,<2.3.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# AI/ML Dependencies
+spacy>=3.7.5,<3.8.0
+spacy-layout @ git+https://github.com/explosion/spacy-layout.git
+en-core-sci-scibert @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_scibert-0.5.4.tar.gz
+
+# GPU Support (optional but recommended)
+cupy>=12.0.0
+
+# Vector Database
+weaviate-client>=4.0.0
+
+# LLM Providers
+openai>=1.0.0
+
+# PDF Processing (optional)
+pdfplumber>=0.10.0
+pypdf>=4.0.0
+
+# Additional utilities
+tqdm>=4.65.0
