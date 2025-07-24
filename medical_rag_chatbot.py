@@ -10,12 +10,23 @@ import sys
 from typing import List, Dict, Tuple
 from dotenv import load_dotenv
 
+# Cross-encoder imports for reranking
+try:
+    from sentence_transformers import CrossEncoder
+    CROSS_ENCODER_AVAILABLE = True
+    print("✅ Cross-encoder available for reranking")
+except ImportError as e:
+    CROSS_ENCODER_AVAILABLE = False
+    print(f"⚠️  Cross-encoder not available: {e}")
+    print("📦 Run: pip install sentence-transformers")
+
 # Load environment variables
 load_dotenv()
 
 # Global variables
 client = None
 nlp = None
+cross_encoder = None  # Cross-encoder for reranking
 USE_OPENAI = False
 LLM_CHOICE = None
 SELECTED_LM_STUDIO_MODEL = None
@@ -35,16 +46,61 @@ OPENAI_MODELS = {
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 def initialize_spacy():
-    """Initialize spaCy with GPU acceleration"""
+    """Initialize spaCy with fallback from GPU to CPU"""
     global nlp
+    
+    # First try GPU
     try:
         spacy.require_gpu()
-        print("✅ spaCy GPU enabled.")
+        nlp = spacy.load("en_core_sci_scibert")
+        print("✅ spaCy SciSciBERT model loaded with GPU")
+        return
     except Exception as e:
-        print(f"⚠️ spaCy GPU not enabled: {e}. Proceeding with CPU.")
+        print(f"⚠️ spaCy GPU failed: {e}")
+        print("🔄 Falling back to CPU mode...")
     
-    nlp = spacy.load("en_core_sci_scibert")
-    print("✅ spaCy SciSciBERT model loaded")
+    # Fallback to CPU
+    try:
+        # Ensure we're not trying to use GPU
+        spacy.prefer_gpu(0)  # This will fail safely if no GPU
+        nlp = spacy.load("en_core_sci_scibert")
+        print("✅ spaCy SciSciBERT model loaded with CPU")
+    except Exception as e:
+        print(f"❌ Failed to load spaCy model: {e}")
+        print("🔄 Setting nlp to None - will skip entity processing")
+        nlp = None
+
+def initialize_cross_encoder():
+    """Initialize cross-encoder for reranking"""
+    global cross_encoder
+    
+    if not CROSS_ENCODER_AVAILABLE:
+        print("⚠️  Cross-encoder not available - skipping initialization")
+        return False
+    
+    try:
+        # Use a medical/clinical cross-encoder model if available, otherwise general purpose
+        models_to_try = [
+            'cross-encoder/ms-marco-MiniLM-L-6-v2',  # General purpose, good performance
+            'cross-encoder/ms-marco-MiniLM-L-12-v2', # Better quality, slower
+        ]
+        
+        for model_name in models_to_try:
+            try:
+                print(f"🔄 Loading cross-encoder: {model_name}")
+                cross_encoder = CrossEncoder(model_name)
+                print(f"✅ Cross-encoder loaded: {model_name}")
+                return True
+            except Exception as e:
+                print(f"⚠️  Failed to load {model_name}: {e}")
+                continue
+        
+        print("❌ Failed to load any cross-encoder model")
+        return False
+        
+    except Exception as e:
+        print(f"❌ Cross-encoder initialization error: {e}")
+        return False
 
 def initialize_weaviate():
     """Initialize Weaviate connection"""
@@ -58,15 +114,19 @@ def initialize_weaviate():
         return False
 
 def query_weaviate(query_text: str, limit: int = 5) -> List[Dict]:
-    """Query Weaviate for relevant context"""
+    """Query Weaviate for relevant context with increased limit for reranking"""
     if not client:
         return []
     
     try:
         collection = client.collections.get("AbstractSentence")
+        
+        # Get more results than needed for reranking (2-3x the final limit)
+        search_limit = limit * 3 if cross_encoder else limit
+        
         results = collection.query.near_text(
             query=query_text,
-            limit=limit,
+            limit=search_limit,
             return_metadata=["score"]
         )
         
@@ -84,21 +144,66 @@ def query_weaviate(query_text: str, limit: int = 5) -> List[Dict]:
         print(f"Error querying Weaviate: {e}")
         return []
 
+def rerank_with_cross_encoder(query: str, contexts: List[Dict], final_limit: int = 5) -> List[Dict]:
+    """Rerank contexts using cross-encoder for better relevance"""
+    global cross_encoder
+    
+    if not CROSS_ENCODER_AVAILABLE or cross_encoder is None or len(contexts) <= 1:
+        print("🔄 Cross-encoder not available, returning original results")
+        return contexts[:final_limit]
+    
+    try:
+        print(f"🎯 Reranking {len(contexts)} contexts with cross-encoder...")
+        
+        # Prepare query-context pairs for cross-encoder
+        pairs = [[query, ctx['text']] for ctx in contexts]
+        
+        # Get cross-encoder scores (higher = more relevant)
+        scores = cross_encoder.predict(pairs)
+        
+        # Add cross-encoder scores to contexts
+        for ctx, score in zip(contexts, scores):
+            ctx['cross_encoder_score'] = float(score)
+            ctx['original_score'] = ctx.get('score', 0.0)
+        
+        # Sort by cross-encoder score (descending)
+        reranked_contexts = sorted(contexts, key=lambda x: x['cross_encoder_score'], reverse=True)
+        
+        # Take top results after reranking
+        final_contexts = reranked_contexts[:final_limit]
+        
+        print(f"✅ Reranked to top {len(final_contexts)} contexts")
+        for i, ctx in enumerate(final_contexts[:3]):  # Show top 3
+            print(f"   {i+1}. Cross-encoder: {ctx['cross_encoder_score']:.3f}, Original: {ctx['original_score']:.3f}")
+            print(f"      {ctx['text'][:100]}...")
+        
+        return final_contexts
+        
+    except Exception as e:
+        print(f"⚠️  Cross-encoder reranking failed: {e}")
+        return contexts[:final_limit]
+
 def process_query_with_spacy(query: str) -> str:
     """Process user query with spaCy for entity extraction"""
     if not nlp:
+        print("⚠️ spaCy not available, using original query")
         return query
     
-    doc = nlp(query)
-    entities = [(ent.text, ent.label_) for ent in doc.ents]
-    
-    # Enhance query with extracted entities for better retrieval
-    enhanced_query = query
-    if entities:
-        entity_terms = [ent[0] for ent in entities]
-        enhanced_query = f"{query} {' '.join(entity_terms)}"
-    
-    return enhanced_query
+    try:
+        doc = nlp(query)
+        entities = [(ent.text, ent.label_) for ent in doc.ents]
+        
+        # Enhance query with extracted entities for better retrieval
+        enhanced_query = query
+        if entities:
+            entity_terms = [ent[0] for ent in entities]
+            enhanced_query = f"{query} {' '.join(entity_terms)}"
+        
+        return enhanced_query
+    except Exception as e:
+        print(f"⚠️ spaCy processing failed: {e}")
+        print("🔄 Using original query without entity enhancement")
+        return query
 
 def call_lm_studio(messages: List[Dict], max_tokens: int = 1000, temperature: float = 0.7) -> str:
     """Call LM Studio API with performance tracking"""
@@ -370,12 +475,19 @@ def generate_response(query: str, history: List[Tuple[str, str]], max_tokens: in
     
     # Retrieve relevant context from Weaviate
     contexts = query_weaviate(enhanced_query, limit=5)
-    print(f"📚 Found {len(contexts)} contexts")
+    print(f"📚 Found {len(contexts)} initial contexts from Weaviate")
     
     if not contexts:
         response = "❌ No relevant information found in the knowledge base."
         history.append((query, response))
         return "", history, "❌ No contexts found"
+    
+    # Apply cross-encoder reranking if available
+    if cross_encoder and len(contexts) > 1:
+        contexts = rerank_with_cross_encoder(query, contexts, final_limit=5)
+        print(f"🎯 After reranking: {len(contexts)} contexts selected")
+    else:
+        contexts = contexts[:5]  # Limit to 5 if no reranking
     
     # Build context string
     context_text = "\\n\\n".join([
@@ -427,7 +539,7 @@ Please provide a comprehensive answer based on the context above."""
     
     # Add sources
     sources = "\\n\\n**Sources:**\\n" + "\\n".join([
-        f"• {ctx['filename']} (Page {ctx['page']}, Relevance: {ctx['score']:.3f})"
+        f"• {ctx['filename']} (Page {ctx['page']}, Relevance: {ctx.get('cross_encoder_score', ctx['score']):.3f})"
         for ctx in contexts
     ])
     
@@ -460,6 +572,7 @@ def create_interface():
     """Create Gradio interface"""
     # Initialize components
     initialize_spacy()
+    cross_encoder_loaded = initialize_cross_encoder()
     weaviate_connected = initialize_weaviate()
     
     if not weaviate_connected:
@@ -524,6 +637,7 @@ def create_interface():
                 status_text = f"""
                 **Weaviate:** {'✅ Connected' if weaviate_connected else '❌ Disconnected'}  
                 **spaCy SciSciBERT:** ✅ Loaded  
+                **Cross-Encoder Reranking:** {'✅ Enabled' if cross_encoder_loaded else '⚠️ Disabled'}  
                 **GPU Acceleration:** {'✅ Enabled' if spacy.prefer_gpu() else '⚠️ CPU Only'}
                 """
                 gr.Markdown(status_text)

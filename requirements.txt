@@ -6,8 +6,10 @@ python-dotenv>=1.0.0
 
 # AI/ML Dependencies
 spacy>=3.7.5,<3.8.0
-spacy-layout @ git+https://github.com/explosion/spacy-layout.git
+spacy-transformers>=1.3.5  # For transformer models in spaCy
 en-core-sci-scibert @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_scibert-0.5.4.tar.gz
+sentence-transformers>=2.7.0  # For cross-encoder reranking
+torch>=2.0.0  # Required for spaCy transformers and sentence-transformers
 
 # GPU Support (optional but recommended)
 cupy>=12.0.0
@@ -18,9 +20,10 @@ weaviate-client>=4.0.0
 # LLM Providers
 openai>=1.0.0
 
-# PDF Processing (optional)
+# PDF Processing
 pdfplumber>=0.10.0
 pypdf>=4.0.0
 
 # Additional utilities
 tqdm>=4.65.0
+hashlib  # Built-in, for file tracking

@@ -72,6 +72,12 @@ logs/
 *.jsonl
 # *.pdf
 
+# Runtime tracking files
+processed_files_tracking.json
+
+# Temp pip output files
+=*
+
 # System packages
 *.deb
 *.rpm
