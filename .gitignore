@@ -94,3 +94,4 @@ weaviate_data/
 # Local configuration
 config.local.yml
 settings.local.yml
+*.backup
