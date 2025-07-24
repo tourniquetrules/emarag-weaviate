@@ -18,16 +18,21 @@ def load_tracking_data():
 def get_existing_filenames(collection):
     """Get list of filenames already in Weaviate collection"""
     try:
-        # Query for all unique filenames
-        result = collection.aggregate.over_all(
-            group_by="filename"
+        print("🔍 Checking existing files in database...")
+        # Use query instead of aggregate for better compatibility
+        results = collection.query.fetch_objects(
+            limit=10000,  # Increase limit to get all objects
+            return_properties=["filename"]
         )
+        
         existing_files = set()
-        if hasattr(result, 'groups') and result.groups:
-            for group in result.groups:
-                if group.grouped_by and 'value' in group.grouped_by:
-                    existing_files.add(group.grouped_by['value'])
+        for obj in results.objects:
+            if obj.properties and "filename" in obj.properties:
+                existing_files.add(obj.properties["filename"])
+        
+        print(f"📊 Found {len(existing_files)} unique files in database")
         return existing_files
+        
     except Exception as e:
         print(f"Could not retrieve existing filenames: {e}")
         return set()

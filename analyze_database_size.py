@@ -90,23 +90,22 @@ def get_detailed_weaviate_stats():
         print(f"🔢 Estimated Vector Storage: {estimated_vector_storage:.2f} MB")
         print(f"📦 Total Estimated Storage: {estimated_text_storage + estimated_vector_storage:.2f} MB")
         
-        # Get schema info
-        schema = client.schema.get()
-        classes = schema.get('classes', [])
-        
-        print(f"\n🏗️ Schema Information:")
-        print("=" * 30)
-        for cls in classes:
-            class_name = cls.get('class', 'Unknown')
-            properties = cls.get('properties', [])
-            print(f"📋 Class: {class_name}")
-            print(f"   🔧 Properties: {len(properties)}")
-            for prop in properties[:5]:  # Show first 5 properties
-                prop_name = prop.get('name', 'Unknown')
-                prop_type = prop.get('dataType', ['Unknown'])[0]
-                print(f"      • {prop_name}: {prop_type}")
-            if len(properties) > 5:
-                print(f"      ... and {len(properties) - 5} more")
+        # Try to get schema info (this might fail with newer Weaviate client)
+        try:
+            # Use the new client API for schema
+            collections = client.collections.list_all()
+            
+            print(f"\n🏗️ Schema Information:")
+            print("=" * 30)
+            for collection_name in collections:
+                try:
+                    collection = client.collections.get(collection_name)
+                    print(f"📋 Collection: {collection_name}")
+                    print(f"   � Estimated objects: Part of {total_objects:,} total")
+                except Exception as schema_e:
+                    print(f"   ⚠️ Could not get details: {schema_e}")
+        except Exception as schema_error:
+            print(f"\n⚠️ Schema information unavailable with current client: {schema_error}")
         
         client.close()
         return {
